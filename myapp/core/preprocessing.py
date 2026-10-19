@@ -63,20 +63,42 @@ COMPOUND_SPLITS = {
 }
 
 # product_details keys whose values carry no topical information (codes, washing
-# instructions, packaging, provenance). Their values are excluded from the text.
+# instructions, packaging, provenance, warranty, measurements). Their values are
+# excluded from the text. Keys are compared lower-cased and stripped, because the raw
+# data spells the same key in several ways ("Pack of" / "Pack Of",
+# "Care Instructions" / "Care instructions").
 DETAIL_KEYS_TO_DROP = {
-    "Style Code",
-    "Model Name",
-    "Fabric Care",
-    "Sales Package",
-    "Number of Contents in Sales Package",
-    "Pack of",
-    "Country of Origin",
-    "Other Details",
-    "Net Quantity",
-    "Width",
-    "Length",
+    "style code",
+    "model name",
+    "model number",
+    "fabric care",
+    "care instructions",
+    "sales package",
+    "package contains",
+    "number of contents in sales package",
+    "pack of",
+    "country of origin",
+    "net quantity",
+    "width",
+    "length",
+    "weight",
+    "other dimensions",
+    "minimum age",
+    "maximum age",
+    # Warranty terms ("3 Months", "Manufacturing defects") say nothing about the product.
+    "domestic warranty",
+    "international warranty",
+    "warranty service type",
+    "warranty summary",
+    "covered in warranty",
+    "not covered in warranty",
+    # A secondary colour would make e.g. a white t-shirt with black print match "black".
+    "secondary color",
 }
+
+# "Other Details" is free text: sometimes a useful mini-description ("Star Wars printed
+# Yellow Sweatshirt for Men"), sometimes washing instructions. Only the latter is dropped.
+CARE_TEXT = re.compile(r"\b(wash|bleach|iron|tumble|dry clean|care)\b", re.IGNORECASE)
 
 # Fields every result must expose to the user (assignment, Part 1 point 2).
 OUTPUT_FIELDS = [
@@ -187,7 +209,8 @@ def flatten_product_details(details: Any) -> Dict[str, str]:
 def product_details_to_text(details: Dict[str, str]) -> str:
     """Build the searchable text of the product details.
 
-    * Values of non-informative keys (``DETAIL_KEYS_TO_DROP``) are ignored.
+    * Values of non-informative keys (``DETAIL_KEYS_TO_DROP``, case-insensitive) are
+      ignored, as is "Other Details" text that is only washing/care instructions.
     * Yes/No attributes are turned into the attribute name when "Yes"
       ({"Hooded": "Yes"} -> "hooded"); "No" is dropped, since "no" carries no meaning
       without its key.
@@ -201,9 +224,12 @@ def product_details_to_text(details: Dict[str, str]) -> str:
     parts: List[str] = []
     seen = set()
     for key, value in details.items():
-        if key in DETAIL_KEYS_TO_DROP or value is None:
+        key_norm = str(key).strip().lower()
+        if key_norm in DETAIL_KEYS_TO_DROP or value is None:
             continue
         value = str(value).strip()
+        if key_norm == "other details" and CARE_TEXT.search(value):
+            continue
         if value.lower() == "yes":
             value = key
         elif value.lower() in {"no", "na", "n/a", ""}:

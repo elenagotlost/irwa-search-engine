@@ -134,9 +134,12 @@ dmypy.json
 # dotenv environment variables file
 .env
 .venv
-irwa_env/
+irwa_venv/
 data/
 
 # Project data (provided by the instructor, too large for git)
 data/fashion_products_dataset.json
 data/processed_corpus.pkl
+
+# macOS Finder metadata
+.DS_Store
