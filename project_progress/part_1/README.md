@@ -5,7 +5,7 @@
 | File | What it is |
 |---|---|
 | `part_1.ipynb` | Notebook: runs the pre-processing, justifies the field decisions with data, and performs the EDA |
-| `../../myapp/core/preprocessing.py` | The pre-processing pipeline (reused by Parts 2–4 for documents **and** queries) |
+| `../../myapp/core/preprocessing.py` | The pre-processing pipeline (reused by Parts 2–4 for documents and queries) |
 | `figures/` | Figures produced by the notebook and used in the report |
 | `IRWA-2026-uXXXXXX-uXXXXXX-uXXXXXX-part-1.pdf` | Report |
 
