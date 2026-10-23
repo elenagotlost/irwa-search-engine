@@ -1,18 +1,18 @@
 """
 Text and field pre-processing for the IRWA fashion-products search engine (Part 1).
 
-The module turns each raw product record into a clean, search-ready record with:
+This code turns each raw product record into a clean, search-ready record with:
 
 * the original display fields kept untouched (pid, title, description, brand, ...,
-  url) so that later parts can return them to the user, and
+  url) so that later parts can return them to the user
 * token lists for every searchable text field (title, description, product
-  details, brand) plus a combined ``all_tokens`` field, and
-* parsed numeric / boolean fields (prices, discount, rating, stock) that are
-  NOT indexed as text but kept as typed attributes for filtering and ranking.
+  details, brand) plus a combined 'all_tokens' field
+* parsed numeric/boolean fields (prices, discount, rating, stock) that are
+  NOT indexed as text but kept as typed attributes for filtering and ranking
 
 All functions are pure (no global state is modified) so they can be reused for
 queries in Parts 2-4: a query must go through exactly the same
-``preprocess_text`` pipeline as the documents, otherwise terms will not match.
+'preprocess_text' pipeline as the documents, or the terms will not match
 """
 
 from __future__ import annotations
@@ -28,19 +28,15 @@ from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from nltk.tokenize import word_tokenize
 
-# --------------------------------------------------------------------------------------
-# Resources
-# --------------------------------------------------------------------------------------
+#Resources
 
 STEMMER = PorterStemmer()
 
-# NLTK English stop-word list. We deliberately do NOT add "men"/"women"/"full" etc.:
-# gender and sleeve words are among the most discriminative terms in the validation
-# queries ("women full sleeve sweatshirt cotton", "men slim jeans blue").
+#NLTK English stop-word list
 STOP_WORDS = set(stopwords.words("english"))
 
-# Domain phrases that appear spelled in several ways. They are normalised to one form
-# BEFORE punctuation removal so that "T-Shirt", "t shirt", "tshirt" and "tee" match.
+#Domain phrases that appear spelled in several ways - >normalised to one form
+#we do this BEFORE punctuation removal so that "T-Shirt", "t shirt", "tshirt" and "tee" match
 PHRASE_NORMALISATION = [
     (r"\bt[\s\-]?shirts?\b", "tshirt"),
     (r"\btees?\b", "tshirt"),
@@ -49,8 +45,8 @@ PHRASE_NORMALISATION = [
     (r"\bjean\b", "jeans"),
 ]
 
-# Glued compounds found in product_details values (e.g. Fit: "Slimfit").
-# They are split so that the query term "slim" matches them.
+#glued compounds found in product_details values (for example: Fit: "Slimfit").
+#we split these so that the query term "slim" matches them
 COMPOUND_SPLITS = {
     "slimfit": "slim fit",
     "regularfit": "regular fit",
@@ -62,11 +58,11 @@ COMPOUND_SPLITS = {
     "vneck": "v neck",
 }
 
-# product_details keys whose values carry no topical information (codes, washing
-# instructions, packaging, provenance, warranty, measurements). Their values are
-# excluded from the text. Keys are compared lower-cased and stripped, because the raw
-# data spells the same key in several ways ("Pack of" / "Pack Of",
-# "Care Instructions" / "Care instructions").
+#product_details keys whose values carry no topical information
+#(like codes, washing instructions, packaging, provenance, warranty, measurements)
+#their values are excluded from the text. 
+#these keys are compared lower-cased and stripped
+
 DETAIL_KEYS_TO_DROP = {
     "style code",
     "model name",
@@ -85,22 +81,22 @@ DETAIL_KEYS_TO_DROP = {
     "other dimensions",
     "minimum age",
     "maximum age",
-    # Warranty terms ("3 Months", "Manufacturing defects") say nothing about the product.
+    #warranty terms ("3 Months", "Manufacturing defects") say nothing about the product
     "domestic warranty",
     "international warranty",
     "warranty service type",
     "warranty summary",
     "covered in warranty",
     "not covered in warranty",
-    # A secondary colour would make e.g. a white t-shirt with black print match "black".
+    #secondary colours would make for example white t-shirt with black print match "black"
     "secondary color",
 }
 
-# "Other Details" is free text: sometimes a useful mini-description ("Star Wars printed
-# Yellow Sweatshirt for Men"), sometimes washing instructions. Only the latter is dropped.
+#"Other Details" is free text: sometimes it is a useful mini-description
+#but sometimes it is washing instructions -> we drop it
 CARE_TEXT = re.compile(r"\b(wash|bleach|iron|tumble|dry clean|care)\b", re.IGNORECASE)
 
-# Fields every result must expose to the user (assignment, Part 1 point 2).
+#these fields have to be exposed to the user (assignment, Part 1 point 2)
 OUTPUT_FIELDS = [
     "pid", "title", "description", "brand", "category", "sub_category",
     "product_details", "seller", "out_of_stock", "selling_price", "discount",
@@ -108,26 +104,24 @@ OUTPUT_FIELDS = [
 ]
 
 
-# --------------------------------------------------------------------------------------
-# Text pipeline
-# --------------------------------------------------------------------------------------
+#Text pipeline
 
 def normalise_text(text: Optional[str]) -> str:
     """Lower-case, strip accents and unify domain spellings of a raw string.
 
     Steps:
-      1. ``None``/NaN become an empty string.
-      2. Unicode NFKD + ASCII folding removes accents and odd symbols ("Café" -> "cafe").
-      3. Lower-casing.
-      4. Domain phrase normalisation (``PHRASE_NORMALISATION``), e.g. "t-shirt" -> "tshirt".
-      5. Apostrophes are dropped so "men's" -> "mens" (stemmed later to "men").
-      6. Every other non-alphanumeric character becomes a space. This both removes
-         punctuation and separates words glued by punctuation in the raw data
-         ("rich look.Designed for Comfort,Skin" -> "rich look designed for comfort skin").
-      7. Glued compounds are split (``COMPOUND_SPLITS``).
+      1. 'None'/NaN become an empty string
+      2. Unicode NFKD + ASCII folding removes accents and odd symbols ("Café" -> "cafe")
+      3. Lower-case
+      4. Domain phrase normalisation ('PHRASE_NORMALISATION'), e.g. "t-shirt" -> "tshirt".
+      5. Apostrophes are dropped so "men's" -> "mens" (stemmed later to "men")
+      6. Every other non-alphanumeric character becomes a space.
+            This removes punctuation and separates words glued by punctuation in the raw data
+            ("rich look.Designed for Comfort,Skin" -> "rich look designed for comfort skin")
+      7. Glued compounds are split ('COMPOUND_SPLITS')
 
-    :param text: raw text (may be None).
-    :return: normalised string with single spaces.
+    param text: raw text (may be None)
+    return: normalised string with single spaces
     """
     if text is None or (isinstance(text, float) and np.isnan(text)):
         return ""
@@ -142,9 +136,9 @@ def normalise_text(text: Optional[str]) -> str:
 
 
 def tokenize(text: str) -> List[str]:
-    """Split a normalised string into tokens with NLTK's ``word_tokenize``.
+    """Split a normalised string into tokens with NLTK's 'word_tokenize'.
 
-    Punctuation is already removed by :func:`normalise_text`, so this mainly splits on
+    Punctuation is already removed so this just splits on
     whitespace, but using the NLTK tokenizer keeps the step explicit and robust.
     """
     return word_tokenize(text) if text else []
@@ -155,7 +149,7 @@ def remove_stopwords(tokens: Iterable[str]) -> List[str]:
 
     Pure numbers ("100" from "100% cotton", "2" from "pack of 2") are removed because
     prices/percentages/pack sizes are handled as typed numeric fields, and as text they
-    match almost randomly. Alphanumeric tokens such as "4xl" or "s21" are kept.
+    match almost randomly. Alphanumeric tokens like "4xl" or "s21" are kept.
     """
     return [
         t for t in tokens
@@ -172,29 +166,28 @@ def stem(token: str) -> str:
 def preprocess_text(text: Optional[str], use_stemming: bool = True) -> List[str]:
     """Full pipeline used for BOTH documents and queries.
 
-    normalise -> tokenize -> remove stop words / numbers -> stem.
+    normalise -> tokenize -> remove stop words/numbers -> stem.
 
     >>> preprocess_text("Yorker trackpants made from 100% rich combed cotton.Designed for Comfort")
     ['yorker', 'trackpant', 'made', 'rich', 'comb', 'cotton', 'design', 'comfort']
     >>> preprocess_text("women full sleeve sweatshirt cotton")
     ['women', 'full', 'sleev', 'sweatshirt', 'cotton']
 
-    :param text: raw text.
-    :param use_stemming: set False to inspect the un-stemmed tokens (used in the EDA).
-    :return: list of processed terms.
+    param text: raw text.
+    param use_stemming: set False to inspect the un-stemmed tokens (used in the EDA later).
+    return: list of processed terms.
     """
     tokens = remove_stopwords(tokenize(normalise_text(text)))
     return [stem(t) for t in tokens] if use_stemming else tokens
 
 
-# --------------------------------------------------------------------------------------
-# Structured fields
-# --------------------------------------------------------------------------------------
+
+#Structured fields
 
 def flatten_product_details(details: Any) -> Dict[str, str]:
-    """Turn the raw ``product_details`` list of one-key dicts into a single dict.
+    """Turn the raw 'product_details' list of one-key dicts into a single dict.
 
-    ``[{"Fabric": "Cotton"}, {"Color": "Blue"}]`` -> ``{"Fabric": "Cotton", "Color": "Blue"}``
+    [{"Fabric": "Cotton"}, {"Color": "Blue"}] -> {"Fabric": "Cotton", "Color": "Blue"}
     """
     if isinstance(details, dict):
         return dict(details)
@@ -209,17 +202,11 @@ def flatten_product_details(details: Any) -> Dict[str, str]:
 def product_details_to_text(details: Dict[str, str]) -> str:
     """Build the searchable text of the product details.
 
-    * Values of non-informative keys (``DETAIL_KEYS_TO_DROP``, case-insensitive) are
-      ignored, as is "Other Details" text that is only washing/care instructions.
-    * Yes/No attributes are turned into the attribute name when "Yes"
-      ({"Hooded": "Yes"} -> "hooded"); "No" is dropped, since "no" carries no meaning
-      without its key.
-    * All other values are kept (Fabric, Sleeve, Fit, Color, Ideal For, Pattern, ...).
-      Keys themselves are not indexed: "Fabric" or "Pattern" appear in almost every
-      product and would only add noise.
-    * Repeated values are kept once: many products state the same value under two keys
-      ("Type: Round Neck" and "Neck Type: Round Neck", "Color" and "Brand Color"), which
-      would otherwise double the term frequency for no reason.
+    *Values of non-informative keys are ignored
+    *Yes/No attributes are turned into the attribute name when "Yes"
+    ({"Hooded": "Yes"} -> "hooded"); "No" is dropped, since "no" has no meaning without its key.
+    *All other values are kept (Fabric, Sleeve, Fit, Color, Ideal For, Pattern, ...).
+    *Repeated values are kept once
     """
     parts: List[str] = []
     seen = set()
@@ -243,9 +230,8 @@ def product_details_to_text(details: Dict[str, str]) -> str:
 def normalise_keyword(value: Optional[str]) -> str:
     """Normalise a categorical value (brand, seller, category) as ONE keyword.
 
-    These fields are used for exact-match filtering/faceting, so they are lower-cased
-    and whitespace-collapsed but not split or stemmed ("Clothing and Accessories" stays
-    one value). Empty strings become "".
+    These fields are used for exact-match filtering, so they are lower-cased
+    and collapsed but not split or stemmed. Empty strings become "".
     """
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ""
@@ -263,25 +249,25 @@ def parse_number(value: Any) -> float:
 
 
 def parse_numeric_fields(df: pd.DataFrame) -> pd.DataFrame:
-    """Add typed numeric columns (suffix ``_num``) next to the raw string columns.
+    """Add typed numeric columns (suffix '_num') next to the raw string columns.
 
-    * ``selling_price_num``, ``actual_price_num``: float rupees.
-    * ``discount_num``: percentage. When the raw value is empty it is recomputed from
+    *'selling_price_num', 'actual_price_num': float rupees.
+    *'discount_num': percentage. When the raw value is empty it is recomputed from
       the two prices; when there is no list price at all, actual = selling price and
-      the discount is 0 (``price_imputed`` marks those rows).
-    * ``average_rating_num``: float in [1, 5], NaN when the product has no rating. We do
-      NOT impute 0 (that would mean "rated terribly") nor the mean (that would invent
-      information); ``has_rating`` lets the ranker treat unrated products explicitly.
-    * ``out_of_stock``: kept as bool.
+      the discount is 0 ('price_imputed' marks those rows).
+    *'average_rating_num': float in [1, 5], NaN when the product has no rating. 
+    We do NOT impute 0 (that would mean "rated terribly") nor the mean (that would invent
+      information); 'has_rating' lets the ranker treat unrated products explicitly.
+    * 'out_of_stock': kept as bool.
     """
     out = df.copy()
     out["selling_price_num"] = out["selling_price"].map(parse_number)
     out["actual_price_num"] = out["actual_price"].map(parse_number)
     out["discount_num"] = out["discount"].map(parse_number)
 
-    # Products with an empty actual_price also have an empty discount: the shop shows
-    # only one price when nothing is discounted. We therefore assume
-    # actual_price = selling_price and discount = 0, and flag the rows.
+    #Products with an empty actual_price also have an empty discount: the shop shows
+    #only one price when nothing is discounted. 
+    # We assume actual_price = selling_price and discount = 0, and flag the rows.
     no_list_price = out["actual_price_num"].isna() & out["selling_price_num"].notna()
     out["price_imputed"] = no_list_price
     out.loc[no_list_price, "actual_price_num"] = out.loc[no_list_price, "selling_price_num"]
@@ -297,9 +283,8 @@ def parse_numeric_fields(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# --------------------------------------------------------------------------------------
-# Corpus level
-# --------------------------------------------------------------------------------------
+
+#Corpus level
 
 def load_raw_corpus(path: str) -> pd.DataFrame:
     """Load the JSON dataset into a DataFrame (one row per product, ``pid`` kept)."""
@@ -310,16 +295,13 @@ def preprocess_corpus(df: pd.DataFrame, use_stemming: bool = True) -> pd.DataFra
     """Pre-process the whole corpus.
 
     Returned columns:
-      * all ``OUTPUT_FIELDS`` in their original form (``product_details`` as a flat dict),
-      * ``title_tokens``, ``description_tokens``, ``details_tokens``, ``brand_tokens``:
-        processed terms per field (for a fielded index / field weighting, e.g. BM25F),
-      * ``all_tokens``: title + description + details + brand (for a single index),
-      * ``brand_kw``, ``seller_kw``, ``category_kw``, ``sub_category_kw``: normalised
-        keywords for filtering,
-      * typed numeric columns from :func:`parse_numeric_fields`.
+      *all 'OUTPUT_FIELDS' in their original form: processed terms per field
+      *'all_tokens': title + description + details + brand (for a single index)
+      *'brand_kw', 'seller_kw', 'category_kw', 'sub_category_kw': normalised keywords for filtering
+      *typed numeric columns from func:`parse_numeric_fields`.
 
-    :param df: raw DataFrame from :func:`load_raw_corpus`.
-    :param use_stemming: forwarded to :func:`preprocess_text`.
+    param df: raw DataFrame from func:`load_raw_corpus`.
+    param use_stemming: forwarded to func:`preprocess_text`.
     """
     out = parse_numeric_fields(df)
     out["product_details"] = out["product_details"].map(flatten_product_details)
