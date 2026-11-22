@@ -1,27 +1,79 @@
 {% extends "base.html" %}
 {% block page_title %}{{ page_title }}{% endblock %}
 {% block content %}
-    Found <strong>{{ found_counter }}</strong> results...
-    <hr>
-    {% if rag_response %}
-        <div class="mb-4 p-3" style="border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9;">
-            <h5>AI-Generated Summary:</h5>
-            <p>{{ rag_response }}</p>
+    {% include "search_form.html" %}
+
+    <p class="results-count mt-3">
+        Found <strong>{{ "{:,}".format(found_counter) }}</strong> results
+        <span class="text-muted">({{ "%.3f"|format(results.elapsed) }} s, ranked with {{ methods[method] }})</span>
+    </p>
+
+    {% if found_counter == 0 %}
+        <div class="alert alert-secondary">
+            {% if results.missing_terms %}
+                No product contains
+                {% for term in results.missing_terms %}<strong>{{ term }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}.
+                Remove {{ "it" if results.missing_terms|length == 1 else "them" }} or try a synonym.
+            {% elif not results.query_terms %}
+                The query has no searchable words (only stop words or numbers).
+            {% else %}
+                No product contains all the words of the query. Try removing one of them.
+            {% endif %}
         </div>
     {% endif %}
-    <hr>
-    {% for item in results_list %}
-        <div class="pb-3">
-            <div class="doc-title">
-                <a href="{{ item.url }}">{{ item.title }}...
-                </a>
-            </div>
-            <div class="doc-desc">
-                {{ item.doc_date }} — {{ item.description }}
-            </div>
 
+    {% if rag_response %}
+        <div class="rag-summary mb-4 p-3">
+            <h5>AI-generated summary</h5>
+            <p class="mb-0" style="white-space: pre-line;">{{ rag_response }}</p>
         </div>
+    {% endif %}
 
+    {% for item in results_list %}
+        <div class="result media pb-3 mb-3">
+            {% if item.image %}
+                <img class="result-img mr-3" src="{{ item.image }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+            {% endif %}
+            <div class="media-body">
+                <div class="doc-title">
+                    <span class="text-muted">{{ item.rank }}.</span>
+                    <a href="{{ item.url }}">{{ item.title }}</a>
+                </div>
+                <div class="doc-meta small">
+                    {% if item.brand %}<span class="mr-2">{{ item.brand }}</span>{% endif %}
+                    {% if item.selling_price is not none %}
+                        <strong>Rs. {{ "{:,.0f}".format(item.selling_price) }}</strong>
+                        {% if item.actual_price and item.actual_price > item.selling_price %}
+                            <s class="text-muted">Rs. {{ "{:,.0f}".format(item.actual_price) }}</s>
+                        {% endif %}
+                    {% endif %}
+                    {% if item.discount %}<span class="text-success ml-1">{{ item.discount|int }}% off</span>{% endif %}
+                    <span class="ml-2">
+                        {% if item.average_rating is not none %}★ {{ "%.1f"|format(item.average_rating) }}{% else %}<span class="text-muted">No rating</span>{% endif %}
+                    </span>
+                    {% if item.out_of_stock %}<span class="badge badge-secondary ml-2">Out of stock</span>{% endif %}
+                </div>
+                {% if item.description %}
+                    <div class="doc-desc small">{{ item.description|truncate(220) }}</div>
+                {% endif %}
+                <div class="small">
+                    <a class="text-muted" href="{{ item.original_url }}" target="_blank" rel="noopener">View on the original website ↗</a>
+                </div>
+            </div>
+        </div>
     {% endfor %}
-{% endblock %}
 
+    {% if n_pages > 1 %}
+        <nav aria-label="Result pages">
+            <ul class="pagination justify-content-center">
+                <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('search', q=results.query, method=method, page=page - 1) }}">Previous</a>
+                </li>
+                <li class="page-item disabled"><span class="page-link">Page {{ page }} of {{ n_pages }}</span></li>
+                <li class="page-item {% if page == n_pages %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('search', q=results.query, method=method, page=page + 1) }}">Next</a>
+                </li>
+            </ul>
+        </nav>
+    {% endif %}
+{% endblock %}

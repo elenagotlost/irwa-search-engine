@@ -98,11 +98,24 @@ class StatsDocument(BaseModel):
 
 
 class ResultItem(BaseModel):
+    """
+    One product on the results page.
+    url is the link to our details page; original_url is the product on the original website.
+    """
     pid: str
     title: str
     description: Optional[str] = None
     url: Optional[str] = None
     ranking: Optional[float] = None
+    rank: Optional[int] = None
+    original_url: Optional[str] = None
+    brand: Optional[str] = None
+    selling_price: Optional[float] = None
+    actual_price: Optional[float] = None
+    discount: Optional[float] = None
+    average_rating: Optional[float] = None
+    out_of_stock: bool = False
+    image: Optional[str] = None
 
     def __str__(self) -> str:
         return self.model_dump_json(indent=2)
