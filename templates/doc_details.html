@@ -39,6 +39,7 @@
                 <tr><th>Availability</th><td>{% if doc.out_of_stock %}<span class="badge badge-secondary">Out of stock</span>{% else %}In stock{% endif %}</td></tr>
                 {% if doc.seller %}<tr><th>Seller</th><td>{{ doc.seller }}</td></tr>{% endif %}
                 <tr><th>Product id</th><td><code>{{ doc.pid }}</code></td></tr>
+                {% if doc.crawled_at %}<tr><th>Data collected on</th><td>{{ doc.crawled_at.strftime("%d %b %Y") }}</td></tr>{% endif %}
             </table>
             <a class="btn btn-primary" href="{{ doc.url }}" target="_blank" rel="noopener">View on the original website ↗</a>
         </div>
