@@ -74,3 +74,5 @@ input[type=submit]:hover {
 .detail-img { width: 100%; max-height: 420px; object-fit: contain; background: #fafafa; }
 .thumbs img { width: 56px; height: 70px; object-fit: contain; margin: 0 4px 4px 0; background: #fafafa; }
 .detail-price { font-size: 1.3em; }
+.rag-label { font-weight: 600; }
+.rag-pick a { font-weight: 500; }

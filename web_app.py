@@ -10,7 +10,8 @@ from myapp.analytics.analytics_data import AnalyticsData, ClickedDoc
 from myapp.search.load_corpus import load_corpus
 from myapp.search.objects import Document, StatsDocument
 from myapp.search.search_engine import SearchEngine, METHODS, DEFAULT_METHOD
-from myapp.generation.rag import RAGGenerator
+from myapp.generation.constraints import parse_constraints
+from myapp.generation.rag import BaselineRAGGenerator, RAGGenerator
 from dotenv import load_dotenv
 load_dotenv()  # take environment variables from .env
 
@@ -22,9 +23,11 @@ _default.default = JSONEncoder().default
 JSONEncoder.default = _default
 # end lines ***for using method to_json in objects ***
 
-#results shown per page, and how many of the top results are sent to the LLM summary
+#results shown per page, and how many products are sent to the LLM summary (with all their data)
 RESULTS_PER_PAGE = 20
-RAG_TOP_N = 20
+RAG_TOP_N = 10
+#"improved" (default) or "baseline" (the template RAG, to compare them in the report)
+RAG_MODE = os.getenv("RAG_MODE", "improved").lower()
 
 # instantiate the Flask application
 app = Flask(__name__)
@@ -46,8 +49,9 @@ print(f"\nCorpus is loaded: {len(corpus):,} products")
 search_engine = SearchEngine(processed_path, file_path)
 # instantiate our in memory persistence
 analytics_data = AnalyticsData()
-# instantiate RAG generator
-rag_generator = RAGGenerator()
+# instantiate RAG generator (the improved one reads product details and category from the corpus)
+rag_generator = BaselineRAGGenerator() if RAG_MODE == "baseline" else RAGGenerator(corpus, top_n=RAG_TOP_N)
+print(f"RAG mode: {RAG_MODE}")
 
 
 # Home URL "/"
@@ -89,7 +93,11 @@ def search():
     session['last_search_query'] = search_query
     session['last_method'] = method
 
-    results = search_engine.search(search_query, search_id, corpus, method=method)
+    #price / rating limits ("under 500", "4+ stars") are not words of the products: we search without them
+    #and the RAG checks them on the results. If nothing is left (query "under 500") we search the original text
+    constraints = parse_constraints(search_query)
+    results = search_engine.search(constraints.search_text or search_query, search_id, corpus, method=method)
+    results.query = search_query  #the search box and the page links keep what the user wrote
 
     found_count = len(results)
     session['last_found_count'] = found_count
@@ -98,9 +106,13 @@ def search():
     page_items = results.items[(page - 1) * RESULTS_PER_PAGE: page * RESULTS_PER_PAGE]
 
     # generate RAG response based on user query and the top retrieved results (only on the first page)
+    #all the results are passed (not only the top 20): the improved RAG looks for products that fit the limits
     rag_response = None
-    if page == 1 and found_count > 0:
-        rag_response = rag_generator.generate_response(search_query, results.items, top_N=RAG_TOP_N)
+    if page == 1 and RAG_MODE == "baseline" and found_count > 0:
+        rag_response = rag_generator.generate_response(search_query, results.items, top_N=20)
+    elif page == 1 and found_count > 0:
+        rag_response = rag_generator.generate_response(search_query, results.items, constraints=constraints)
+    if rag_response is not None:
         print("RAG response:", rag_response)
 
     return render_template('results.html', page_title="Results", results=results, results_list=page_items,

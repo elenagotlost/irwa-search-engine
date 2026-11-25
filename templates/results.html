@@ -25,7 +25,31 @@
     {% if rag_response %}
         <div class="rag-summary mb-4 p-3">
             <h5>AI-generated summary</h5>
-            <p class="mb-0" style="white-space: pre-line;">{{ rag_response }}</p>
+            {% if rag_response is string %}
+                {# baseline RAG (RAG_MODE=baseline): plain text #}
+                <p class="mb-0" style="white-space: pre-line;">{{ rag_response }}</p>
+            {% else %}
+                {% if rag_response.constraints %}
+                    <p class="small text-muted mb-2">Understood from your query: {{ rag_response.constraints }}</p>
+                {% endif %}
+                {% for label, pick in [("Best match", rag_response.best), ("Alternative", rag_response.alternative)] if pick %}
+                    <div class="rag-pick mb-2">
+                        <span class="rag-label">{{ label }}:</span>
+                        <a href="{{ pick.url }}">{{ pick.title }}</a>
+                        <span class="small text-muted">
+                            {% if pick.price is not none %}· Rs. {{ "{:,.0f}".format(pick.price) }}{% endif %}
+                            {% if pick.rating is not none %}· ★ {{ "%.1f"|format(pick.rating) }}{% endif %}
+                        </span>
+                        {% if pick.why %}<div class="small">{{ pick.why }}</div>{% endif %}
+                    </div>
+                {% endfor %}
+                {% if rag_response.message %}
+                    <p class="mb-2" style="white-space: pre-line;">{{ rag_response.message }}</p>
+                {% endif %}
+                {% if rag_response.overview %}
+                    <p class="small text-muted mb-0">{{ rag_response.overview }}.</p>
+                {% endif %}
+            {% endif %}
         </div>
     {% endif %}
 
