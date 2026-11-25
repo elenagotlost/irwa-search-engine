@@ -1,0 +1,19 @@
+{# Search box shared by the home page and the results page. GET, so every search has its own URL.
+   "results is defined" and not "if results": a search with 0 results is falsy but still has a query. #}
+<form class="search-form" method="GET" action="/search" role="search">
+    <div class="input-group">
+        <input class="form-control" name="q" type="search" placeholder="Search products" aria-label="Search"
+               value="{{ results.query if results is defined else '' }}" required {% if results is not defined %}autofocus{% endif %}>
+        <div class="input-group-append">
+            <button class="btn btn-primary" type="submit">Search</button>
+        </div>
+    </div>
+    <div class="method-choice small text-muted mt-2">
+        Ranking:
+        {% for key, label in methods.items() %}
+            <label class="ml-2 mb-0">
+                <input type="radio" name="method" value="{{ key }}" {% if key == method %}checked{% endif %}> {{ label }}
+            </label>
+        {% endfor %}
+    </div>
+</form>
