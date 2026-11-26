@@ -120,6 +120,8 @@ DETAIL_SKIP = {"style code", "other details", "wash care", "fabric care", "model
 MAX_DETAILS = 8
 MAX_DETAIL_VALUE = 60
 MAX_DESCRIPTION = 250
+#the "closest option" when nothing fits is looked for among the first CLOSEST_POOL results
+CLOSEST_POOL = 30
 
 SYSTEM_PROMPT = """You are a shopping assistant for an Indian fashion e-commerce website (prices in Indian rupees, Rs.).
 You choose products ONLY from the numbered list you are given.
@@ -270,8 +272,9 @@ class RAGGenerator:
         if not constraints.has_hard_limits or (skipped["out_of_stock"] and not skipped["price"] and not skipped["rating"]):
             parts[0] = f"All {n:,} products that match your request are out of stock"
 
-        #closest product for the first limit the user gave (in stock if possible)
-        docs = [self._doc(item) for item in retrieved_results]
+        #closest product for the first limit the user gave, among the best ranked (in stock if possible):
+        #far down the list there are products that only match through their description (a t-shirt for "jacket")
+        docs = [self._doc(item) for item in retrieved_results[:CLOSEST_POOL]]
         docs = [d for d in docs if not _get(d, "out_of_stock")] or docs
         closest, note = None, ""
         if constraints.max_price is not None:
@@ -406,10 +409,16 @@ class RAGGenerator:
                     price=_get(doc, "selling_price"), rating=_get(doc, "average_rating"))
 
     def call_llm(self, messages):
+        """
+        :return: (text of the answer, prompt tokens). The text can be empty if the model failed twice.
+        """
         client = self.client or _make_client()
         if self.client is None:
             self.client = client
-        kwargs = dict(model=self.model, messages=messages, temperature=self.temperature, max_tokens=400)
+        kwargs = dict(model=self.model, messages=messages, temperature=self.temperature, max_tokens=1500)
+        if self.model.startswith("openai/gpt-oss"):
+            #reasoning model: its thinking counts in max_tokens, keep it short (the task is simple)
+            kwargs["reasoning_effort"] = "low"
         try:
             completion = client.chat.completions.create(response_format={"type": "json_object"}, **kwargs)
         except Exception as e:
@@ -417,8 +426,14 @@ class RAGGenerator:
             if "response_format" not in str(e) and "json" not in str(e).lower():
                 raise
             completion = client.chat.completions.create(**kwargs)
+        text = completion.choices[0].message.content
+        if not (text or "").strip():
+            #empty answer (the thinking used all the tokens, or JSON mode gave nothing): one retry with more room
+            print(f"Empty LLM answer (finish_reason={getattr(completion.choices[0], 'finish_reason', None)}), retrying")
+            completion = client.chat.completions.create(**{**kwargs, "max_tokens": 3000})
+            text = completion.choices[0].message.content
         usage = getattr(completion, "usage", None)
-        return completion.choices[0].message.content, getattr(usage, "prompt_tokens", None)
+        return text, getattr(usage, "prompt_tokens", None)
 
     # --- main entry point -------------------------------------------------------------------------
 
@@ -460,6 +475,12 @@ class RAGGenerator:
         except Exception as e:
             print(f"Error during RAG generation: {e}")
             response.status, response.message, response.used_llm = "unavailable", DEFAULT_ANSWER, False
+            response.latency = time.perf_counter() - start
+            return response  #not cached: the next search tries again
+
+        if not (raw or "").strip():
+            response.status, response.used_llm = "unavailable", False
+            response.message = "The language model returned an empty answer. Try the search again."
             response.latency = time.perf_counter() - start
             return response  #not cached: the next search tries again
 
