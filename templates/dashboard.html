@@ -6,6 +6,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.6.2/chart.min.js"
             integrity="sha512-tMabqarPtykgDtdtSqCL3uLVM0gS1ZkUAVhRFu1vSEFgvB73niFQWJuvviDyBGBH22Lcau4rHB5p2K2T0Xvr6Q=="
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <style>
+        .kpi { border: 1px solid #ddd; border-radius: 6px; padding: 10px; text-align: center; margin-bottom: 12px; }
+        .kpi .v { font-size: 1.4rem; font-weight: 600; }
+        .kpi .l { font-size: .8rem; color: #666; }
+        .chart-box { margin-bottom: 32px; }
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -20,11 +26,128 @@
     - preferred terms
     - etc.
 
+    We use a macro so we can ruse it for every chart
+
     -->
+    {% macro box(id, title, text, height=260) %}
+        <div class="chart-box">
+            <h5>{{ title }}</h5>
+            <p class="small text-muted">{{ text }}</p>
+            <div style="position: relative; height: {{ height }}px;"><canvas id="{{ id }}"></canvas></div>
+        </div>
+    {% endmacro %}
 
     <h3>Dashboard</h3>
-    <iframe src="/plot_number_of_views" width="600" height="400" style="border: none;"></iframe>
 
+    <p class="text-muted small">Usage since the server started ({{ data.since }}). All the data is kept in memory.
+        Raw tables: <a href="/analytics/export">/analytics/export</a></p>
+
+    <h5>Key indicators</h5>
+    <div class="row">
+        {% for label, value in data.kpis.items() %}
+            <div class="col-6 col-md-3"><div class="kpi"><div class="v">{{ value }}</div><div class="l">{{ label }}</div></div></div>
+        {% endfor %}
+    </div>
+    <p class="small text-muted">Click-through rate = searches with results where at least one product was opened.
+        A low average rank of clicked results and a high share in the top 3 mean the ranking puts useful products first.
+        Dwell time = seconds spent on a product page before leaving it.</p>
+
+    <iframe src="/plot_number_of_views" width="600" height="400" style="border: none;"></iframe>
+    
+    <h4 class="mt-4">Traffic</h4>
+    {{ box("c_days", "Requests per day", "Number of HTTP requests (pages, searches, clicks) received each day.") }}
+    {{ box("c_pages", "Most requested pages", "Which parts of the website receive the requests.") }}
+    {{ box("c_hours", "Searches by time of day", "When people search, by hour of the server clock.") }}
+
+    <h4 class="mt-4">Visitors</h4>
+    <div class="row">
+        <div class="col-md-4">{{ box("c_browsers", "Browser", "Sessions per browser.", 220) }}</div>
+        <div class="col-md-4">{{ box("c_os", "Operating system", "Sessions per OS.", 220) }}</div>
+        <div class="col-md-4">{{ box("c_devices", "Device", "Desktop / mobile / tablet, from the user agent.", 220) }}</div>
+    </div>
+    {{ box("c_countries", "Country", "Sessions per country (from the IP, only public IPs and with GEOIP=1).") }}
+
+    <h4 class="mt-4">Queries</h4>
+    {{ box("c_top_queries", "Most frequent queries", "What users look for the most.", 300) }}
+    {{ box("c_top_terms", "Most frequent terms", "Terms after our preprocessing (stemmed), across all queries.", 300) }}
+    {{ box("c_query_length", "Query length", "Number of words per query: e-commerce queries are usually short.") }}
+    <h5>Queries with no results</h5>
+    <p class="small text-muted">Products users want and do not find (or words our index does not know): ideas to improve the engine.</p>
+    {% if data.zero_queries %}
+        <ul>{% for q, n in data.zero_queries %}<li>{{ q }} <span class="text-muted">({{ n }})</span></li>{% endfor %}</ul>
+    {% else %}<p class="small">None yet.</p>{% endif %}
+
+    <h4 class="mt-4">Results and clicks</h4>
+    {{ box("c_click_ranks", "Position of the clicked results", "How many clicks each rank receives. Most clicks should be at the top.") }}
+    {{ box("c_dwell", "Dwell time", "Time spent on a product page. Very short visits suggest the result was not what the user wanted.") }}
+
+    <h5>Ranking methods</h5>
+    <p class="small text-muted">Each search can use a different ranking method: this compares how users react to each one.</p>
+    <table class="table table-sm">
+        <tr><th>Method</th><th>Searches</th><th>Click-through rate</th><th>Avg. rank of clicks</th></tr>
+        {% for m in data.methods %}
+            <tr><td>{{ m.method }}</td><td>{{ m.searches }}</td><td>{{ m.ctr }}</td><td>{{ m.avg_rank }}</td></tr>
+        {% endfor %}
+    </table>
+
+    <h5>Most clicked products</h5>
+    <table class="table table-sm">
+        <tr><th>Product</th><th>Clicks</th><th>Avg. rank</th><th>Avg. dwell (s)</th></tr>
+        {% for d in data.top_docs %}
+            <tr><td><a href="{{ url_for('doc_details', pid=d.pid) }}">{{ d.title }}</a></td>
+                <td>{{ d.clicks }}</td><td>{{ d.avg_rank }}</td><td>{{ d.avg_dwell }}</td></tr>
+        {% endfor %}
+    </table>
+
+    <h4 class="mt-4">Sessions and missions</h4>
+    <p class="small text-muted">Last 10 physical sessions (a new one after 30 min of inactivity). Queries in the same box
+        belong to the same mission (they share at least one term with the previous query).</p>
+    <table class="table table-sm small">
+        <tr><th>Start</th><th>Minutes</th><th>Browser · OS · device</th><th>Location</th><th>Requests</th><th>Missions</th></tr>
+        {% for s in data.recent_sessions %}
+            <tr><td>{{ s.start }}</td><td>{{ s.minutes }}</td><td>{{ s.agent }}</td><td>{{ s.location }}</td><td>{{ s.requests }}</td>
+                <td>{% for m in s.missions %}<span class="badge badge-light border mr-1">{{ m|join(" → ") }}</span>{% endfor %}</td></tr>
+        {% endfor %}
+    </table>
+
+    <script>
+        // chart data computed in Python (AnalyticsData.dashboard_data), passed as JSON
+        const C = {{ data.charts|tojson }};
+        const COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"];
+
+        // one function for every chart, so they all look the same.
+        // d = [labels, values]; with no data we show a message instead of an empty chart
+        function draw(id, type, d, horizontal) {
+            const el = document.getElementById(id);
+            if (!d[1].length || d[1].every(v => v === 0)) {
+                el.parentNode.outerHTML = '<p class="small">No data yet.</p>';
+                return;
+            }
+            new Chart(el, {
+                type: type,
+                data: {labels: d[0], datasets: [{data: d[1], backgroundColor: type === "doughnut" ? COLORS : COLORS[0], borderColor: COLORS[0], fill: false, tension: 0.2}]},
+                options: {
+                    indexAxis: horizontal ? "y" : "x",   // horizontal bars for long labels (queries, pages)
+                    maintainAspectRatio: false,
+                    plugins: {legend: {display: type === "doughnut", position: "right"}},
+                    scales: type === "doughnut" ? {} : {x: {beginAtZero: true}, y: {beginAtZero: true}}
+                }
+            });
+        }
+
+        draw("c_days", "line", C.days);
+        draw("c_pages", "bar", C.pages, true);
+        draw("c_hours", "bar", C.hours);
+        draw("c_browsers", "doughnut", C.browsers);
+        draw("c_os", "doughnut", C.os);
+        draw("c_devices", "doughnut", C.devices);
+        draw("c_countries", "bar", C.countries, true);
+        draw("c_top_queries", "bar", C.top_queries, true);
+        draw("c_top_terms", "bar", C.top_terms, true);
+        draw("c_query_length", "bar", C.query_length);
+        draw("c_click_ranks", "bar", C.click_ranks);
+        draw("c_dwell", "bar", C.dwell);
+    </script>
 
 {% endblock %}
 
