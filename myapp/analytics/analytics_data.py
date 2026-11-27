@@ -42,7 +42,7 @@ class Request:
     args: str
     status: int
     duration_ms: float
-    refferer: Optional[str]
+    referer: Optional[str]
 
 @dataclass
 class Query:
@@ -148,7 +148,7 @@ class AnalyticsData:
         Instead of returning random number we return a real id that can be related to a real query
         """
         order = 1 + sum(q.session_id == session_id for q in self.queries.values())
-        search_id = len(self.queries)
+        search_id = len(self.queries) + 1
 
         self.queries[search_id] = Query(search_id, session_id, datetime.now(), terms, len(terms.split()), method, order)
 
@@ -241,7 +241,7 @@ class AnalyticsData:
         with_results = [q for q in done if q.n_results > 0]
         clicks = [c for c in self.clicks.values() if c.kind == "result"]
         outbound = [c for c in self.clicks.values() if c.kind == "outbound"]
-        clicked_searches = {c.search.id for c in clicks if c.search_id is not None}
+        clicked_searches = {c.search_id for c in clicks if c.search_id is not None}
         ranks = [c.rank for c in clicks if c.rank]
         dwell = [c.dwell_s for c in clicks if c.dwell_s is not None]
         missions = Counter(q.mission_id for q in done)
