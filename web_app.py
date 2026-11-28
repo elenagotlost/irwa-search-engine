@@ -1,9 +1,12 @@
 import math
 import os
+import time
+import uuid
 from json import JSONEncoder
 
 import httpagentparser  # for getting the user agent as json
-from flask import Flask, abort, redirect, render_template, session, url_for
+
+from flask import Flask, abort, redirect, render_template, session, url_for, g, jsonify
 from flask import request
 
 from myapp.analytics.analytics_data import AnalyticsData, ClickedDoc
@@ -47,12 +50,47 @@ corpus = load_corpus(file_path)
 print(f"\nCorpus is loaded: {len(corpus):,} products")
 # instantiate our search engine (index and ranking data of Parts 2-3, built once at start)
 search_engine = SearchEngine(processed_path, file_path)
-# instantiate our in memory persistence
-analytics_data = AnalyticsData()
+# instantiate our in memory persistence, GEOIP off by default as it sends visitors IPs to external service
+analytics_data = AnalyticsData(geoip=os.getenv("GEOIP", "0") == "1")
 # instantiate RAG generator (the improved one reads product details and category from the corpus)
 rag_generator = BaselineRAGGenerator() if RAG_MODE == "baseline" else RAGGenerator(corpus, top_n=RAG_TOP_N)
 print(f"RAG mode: {RAG_MODE}")
 
+# CSS, images and the favicon are files of the pages, not user actions: they are not tracked
+NOT_TRACKED = ("/static/", "/favicon.ico")
+# cookie that lasts one year: the same browser is recognised across sit-downs (visitors vs sessions)
+VISITOR_COOKIE = "visitor_id"
+
+#--- web analytics ---
+
+# Flask calls before_requests before every route and after_requests after it
+
+@app.before_request
+def track_request_start():
+    g.start= time.perf_counter() # how long req took
+    g.session_id = None
+    if request.path.startswith(NOT_TRACKED):
+        return
+
+    # visitor id from its cookie or new if it does not exist
+    g.visitor_id = request.cookies.get(VISITOR_COOKIE) or uuid.uuid4().hex
+
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
+    # Physical session id kept in Flask session cookie ("sid"); get_session opens a new one if missing or older than 30 min
+    g.session_id = analytics_data.get_session(session.get("sid"), g.visitor_id, ip, request.headers.get("User-Agent", ""))
+    session["sid"] = g.session_id
+
+@app.after_request
+def track_request_end(response):
+    # response exists, we can store status code and time it took
+    # dwell beacon not stored as a request: it is background message, not a user action
+    if g.get("session_id") and request.path != "/track/dwell":
+        analytics_data.save_request(g.session_id, request.method, request.path, request.query_string.decode(errors="ignore"), response.status_code, (time.perf_counter() - g.start) * 1000, request.referrer)
+    # first visit: send the visitor cookie to the browser
+    if "visitor_id" in g and request.cookies.get(VISITOR_COOKIE) != g.visitor_id:
+        response.set_cookie(VISITOR_COOKIE, g.visitor_id, max_age=365 * 24 * 3600, samesite="Lax")
+    return response
 
 # Home URL "/"
 @app.route('/')
@@ -86,9 +124,10 @@ def search():
     page = max(request.args.get('page', 1, type=int), 1)
 
     #a new search id only when the query or the method changes, not when the user moves between pages
-    if session.get('last_search_query') != search_query or session.get('last_method') != method \
-            or 'last_search_id' not in session:
-        session['last_search_id'] = analytics_data.save_query_terms(search_query)
+    same_search = (session.get('last_search_query') == search_query and session.get('last_method') == method
+                   and analytics_data.is_session_query(session.get('last_search_id'), g.session_id))
+    if not same_search:
+        session['last_search_id'] = analytics_data.save_query_terms(search_query, g.session_id, method)
     search_id = session['last_search_id']
     session['last_search_query'] = search_query
     session['last_method'] = method
@@ -100,6 +139,7 @@ def search():
     results.query = search_query  #the search box and the page links keep what the user wrote
 
     found_count = len(results)
+    analytics_data.update_query_results(search_id, results.method, results.query_terms, found_count)
     session['last_found_count'] = found_count
     n_pages = max(math.ceil(found_count / RESULTS_PER_PAGE), 1)
     page = min(page, n_pages)
@@ -117,7 +157,7 @@ def search():
 
     return render_template('results.html', page_title="Results", results=results, results_list=page_items,
                            found_counter=found_count, rag_response=rag_response, page=page, n_pages=n_pages,
-                           methods=METHODS, method=results.method)
+                           methods=METHODS, method=results.method, search_id=search_id)
 
 
 @app.route('/doc_details', methods=['GET'])
@@ -138,13 +178,43 @@ def doc_details():
     else:
         analytics_data.fact_clicks[clicked_doc_id] = 1
 
+    rank = request.args.get("rank", type=int)
+    click_id = analytics_data.save_click(g.session_id, clicked_doc_id, request.args.get("search_id", type=int), rank)
+
     #link back to the same results page the user came from
     back_url = None
     if session.get('last_search_query'):
         back_url = url_for('search', q=session['last_search_query'], method=session.get('last_method'))
 
     return render_template('doc_details.html', page_title=doc.title, doc=doc, back_url=back_url,
-                           rank=request.args.get("rank", type=int))
+                           rank=rank, click_id = click_id)
+
+@app.route('/go', methods=['GET'])
+def go_outbound():
+    """
+    View original webiste link, lets us store the click that leaves our site
+    """
+    pid = request.args.get("pid")
+    if pid not in corpus or not corpus[pid].url:
+        abort(404)
+    analytics_data.save_click(g.session_id, pid, request.args.get("search_id", type= int), request.args.get("rank", type = int), kind = "outbound")
+
+    return redirect(corpus[pid].url)
+
+@app.route('/track/dwell', methods = ['POST'])
+def track_dwell():
+    """
+    Recieves dwell time from details page
+    back button often shows the results page from the browser cache without asking the server, we would not know when the user came back
+    """
+    data = request.get_json(silent=True) or {}
+
+    try:
+        analytics_data.save_dwell(int(data.get("click_id")), float(data.get("seconds")))
+    except (TypeError, ValueError):
+        pass
+
+    return "", 204
 
 
 @app.route('/stats', methods=['GET'])
@@ -178,13 +248,20 @@ def dashboard():
     visited_docs.sort(key=lambda doc: doc.counter, reverse=True)
 
     for doc in visited_docs: print(doc)
-    return render_template('dashboard.html', visited_docs=visited_docs)
+    return render_template('dashboard.html', page_title = "Dashboard", visited_docs=visited_docs, data = analytics_data.dashboard_data(corpus, METHODS))
 
 
 # New route added for generating an examples of basic Altair plot (used for dashboard)
 @app.route('/plot_number_of_views', methods=['GET'])
 def plot_number_of_views():
     return analytics_data.plot_number_of_views()
+
+@app.route('/analytics/export', methods=['GET'])
+def analytics_export():
+    """
+    All collected tables as JSON
+    """
+    return jsonify(analytics_data.export())
 
 
 if __name__ == "__main__":

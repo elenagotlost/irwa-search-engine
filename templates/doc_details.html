@@ -41,7 +41,7 @@
                 <tr><th>Product id</th><td><code>{{ doc.pid }}</code></td></tr>
                 {% if doc.crawled_at %}<tr><th>Data collected on</th><td>{{ doc.crawled_at.strftime("%d %b %Y") }}</td></tr>{% endif %}
             </table>
-            <a class="btn btn-primary" href="{{ doc.url }}" target="_blank" rel="noopener">View on the original website ↗</a>
+            <a class="btn btn-primary" href="{{ url_for('go_outbound', pid=doc.pid) }}" target="_blank" rel="noopener">View on the original website ↗</a>
         </div>
     </div>
 
@@ -58,4 +58,16 @@
             {% endfor %}
         </table>
     {% endif %}
+    <script>
+        (function () {
+            var clickId = {{ click_id|tojson }};
+            var start = Date.now(), sent = false;
+            window.addEventListener("pagehide", function () {
+                if (sent || clickId === null) return;   // send only once
+                sent = true;
+                var body = JSON.stringify({click_id: clickId, seconds: (Date.now() - start) / 1000});
+                navigator.sendBeacon("{{ url_for('track_dwell') }}", new Blob([body], {type: "application/json"}));
+            });
+        })();
+    </script>
 {% endblock %}

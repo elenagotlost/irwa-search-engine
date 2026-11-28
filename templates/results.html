@@ -81,7 +81,7 @@
                     <div class="doc-desc small">{{ item.description|truncate(220) }}</div>
                 {% endif %}
                 <div class="small">
-                    <a class="text-muted" href="{{ item.original_url }}" target="_blank" rel="noopener">View on the original website ↗</a>
+                    <a class="text-muted" href="{{ url_for('go_outbound', pid=item.pid, search_id=search_id, rank=item.rank) }}" target="_blank" rel="noopener">View on the original website ↗</a>
                 </div>
             </div>
         </div>
