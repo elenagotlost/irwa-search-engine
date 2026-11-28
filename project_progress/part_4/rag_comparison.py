@@ -96,7 +96,8 @@ def main(queries):
             ("improved", len(imp_results), imp_pid, imp_valid, imp_fits,
              imp.status in ("no_match", "no_results"), imp.latency, imp.prompt_tokens),
         ]:
-            rows.append(dict(query=q, system=system, n_results=n, recommended_pid=pid, valid_pid=valid, fits=fits,
+            rows.append(dict(query=q, system=system, status=imp.status if system == "improved" else "",
+                             n_results=n, recommended_pid=pid, valid_pid=valid, fits=fits,
                              no_match=no_match, seconds=round(secs, 2), prompt_tokens=tokens))
 
         md.append(f"## `{q}`\n")
@@ -118,6 +119,7 @@ def main(queries):
         valid_pid=("valid_pid", lambda s: (s == True).sum()),  # noqa: E712
         fits_limits=("fits", lambda s: (s == True).sum()),  # noqa: E712
         said_no_match=("no_match", "sum"),
+        empty_or_failed=("status", lambda s: s.isin(["unavailable", "unparsed"]).sum()),
         mean_seconds=("seconds", "mean"),
         mean_prompt_tokens=("prompt_tokens", "mean"),
     ).round(2)
